@@ -34,6 +34,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// GetReferencedUID returns the UID of the resolved Ingress resource
+func (rr *ReferenceResolver) GetReferencedUID() types.UID {
+	if rr.ingress == nil {
+		return ""
+	}
+	return rr.ingress.UID
+}
+
 var log = logging.Logger()
 
 type ReferenceResolver struct {

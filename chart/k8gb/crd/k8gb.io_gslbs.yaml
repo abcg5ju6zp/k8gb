@@ -25,6 +25,10 @@ spec:
           name: hosts
           priority: 1
           type: string
+        - jsonPath: .status.resourceRefHandoff.to.kind
+          name: handoff
+          priority: 1
+          type: string
       name: v1beta1
       schema:
         openAPIV3Schema:
@@ -407,6 +411,31 @@ spec:
             status:
               description: GslbStatus defines the observed state of Gslb
               properties:
+                activeResourceRef:
+                  description: ResourceRefIdentity identifies a referenced resource
+                    serving the GSLB. Switch detection compares the coordinates (APIVersion/Kind/Name/Selector);
+                    the UID is pinned per active or handoff generation to fence off
+                    writes originating from a deleted, recreated or renamed referenced
+                    object.
+                  properties:
+                    apiVersion:
+                      description: APIVersion of the referenced resource
+                      type: string
+                    kind:
+                      description: Kind of the referenced resource
+                      type: string
+                    name:
+                      description: Name of the referenced resource (empty in LabelSelector
+                        mode)
+                      type: string
+                    selector:
+                      description: Selector is the serialized LabelSelector when the
+                        reference selects resources
+                      type: string
+                    uid:
+                      description: UID of the referenced object observed for this generation
+                      type: string
+                  type: object
                 geoTag:
                   description: Cluster Geo Tag
                   type: string
@@ -455,6 +484,157 @@ spec:
                         type: array
                     type: object
                   type: array
+                resourceRefHandoff:
+                  description: ResourceRefHandoff exists only while ownership of DNSEndpoint
+                    hosts is being handed over from one referenced resource to another.
+                  properties:
+                    from:
+                      description: From identifies the referenced resource which used
+                        to publish DNS.
+                      properties:
+                        apiVersion:
+                          type: string
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        selector:
+                          type: string
+                        uid:
+                          type: string
+                      type: object
+                    generation:
+                      description: Generation pins the Gslb generation at handoff start.
+                      format: int64
+                      type: integer
+                    health:
+                      additionalProperties:
+                        type: string
+                      description: Health pins the last usable per-host health inputs
+                        of the previous owner.
+                      type: object
+                    hostStates:
+                      description: HostStates is the per-hostname handoff phase.
+                      items:
+                        properties:
+                          host:
+                            description: Host is the pinned hostname
+                            type: string
+                          phase:
+                            description: Phase of the ownership handoff for the hostname
+                            type: string
+                        required:
+                        - host
+                        - phase
+                        type: object
+                      type: array
+                    hosts:
+                      description: Hosts pins the hostname set at switch start.
+                      items:
+                        type: string
+                      type: array
+                    lastEndpoint:
+                      description: LastEndpoint is the frozen last usable DNSEndpoint
+                        content.
+                      items:
+                        properties:
+                          dnsName:
+                            type: string
+                          labels:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          recordTtl:
+                            format: int64
+                            type: integer
+                          recordType:
+                            type: string
+                          targets:
+                            items:
+                              type: string
+                            type: array
+                        required:
+                        - dnsName
+                        type: object
+                      type: array
+                    publishReceipt:
+                      description: Receipt is the publish receipt of the in-flight candidate.
+                      properties:
+                        endpoint:
+                          items:
+                            properties:
+                              dnsName:
+                                type: string
+                              labels:
+                                additionalProperties:
+                                  type: string
+                                type: object
+                              recordTtl:
+                                format: int64
+                                type: integer
+                              recordType:
+                                type: string
+                              targets:
+                                items:
+                                  type: string
+                                type: array
+                            required:
+                            - dnsName
+                            type: object
+                          type: array
+                        generation:
+                          format: int64
+                          type: integer
+                        toUid:
+                          type: string
+                      required:
+                      - generation
+                      type: object
+                    reason:
+                      description: Reason explains why the handoff has not completed yet.
+                      type: string
+                    servers:
+                      description: Servers pins the last usable server configuration
+                        of the previous owner.
+                      items:
+                        properties:
+                          host:
+                            type: string
+                          services:
+                            items:
+                              properties:
+                                name:
+                                  type: string
+                                namespace:
+                                  type: string
+                              required:
+                              - name
+                              - namespace
+                              type: object
+                            type: array
+                        type: object
+                      type: array
+                    to:
+                      description: To identifies the referenced resource which is taking
+                        over.
+                      properties:
+                        apiVersion:
+                          type: string
+                        kind:
+                          type: string
+                        name:
+                          type: string
+                        selector:
+                          type: string
+                        uid:
+                          type: string
+                      type: object
+                  required:
+                  - from
+                  - generation
+                  - hosts
+                  - to
+                  type: object
                 serviceHealth:
                   additionalProperties:
                     type: string

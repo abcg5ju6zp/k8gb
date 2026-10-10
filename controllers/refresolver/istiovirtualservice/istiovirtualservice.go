@@ -71,6 +71,14 @@ func NewReferenceResolver(gslb *k8gbv1beta1io.Gslb, k8sClient client.Client) (*R
 	}, nil
 }
 
+// GetReferencedUID returns the UID of the resolved Istio VirtualService resource
+func (rr *ReferenceResolver) GetReferencedUID() types.UID {
+	if rr.virtualService == nil {
+		return ""
+	}
+	return rr.virtualService.UID
+}
+
 // getGslbVirtualServiceRef resolves an istio virtual service resource referenced by the Gslb spec
 func getGslbVirtualServiceRef(gslb *k8gbv1beta1io.Gslb, k8sClient client.Client) ([]*istio.VirtualService, error) {
 	query, err := queryopts.Get(gslb.Spec.ResourceRef, gslb.Namespace)

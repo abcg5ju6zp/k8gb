@@ -25,6 +25,7 @@ RouteAdapter and RouteRule interfaces are used to provide a common interface for
 */
 
 import (
+	"k8s.io/apimachinery/pkg/types"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -35,6 +36,8 @@ type RouteAdapter interface {
 	GetNamespace() string
 	GetParentRefs() []gatewayapiv1.ParentReference
 	GetRules() []RouteRule
+	// GetUID returns the UID of the adapted route object
+	GetUID() types.UID
 }
 
 // RouteRule provides access to common rule fields shared by all Gateway API's route resources (HTTPRoute, GRPCRoute, etc.)

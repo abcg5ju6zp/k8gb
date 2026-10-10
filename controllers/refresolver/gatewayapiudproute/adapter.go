@@ -23,6 +23,7 @@ import (
 
 	"github.com/k8gb-io/k8gb/controllers/refresolver/gatewayapi"
 	"github.com/k8gb-io/k8gb/controllers/utils"
+	"k8s.io/apimachinery/pkg/types"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayapiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 )
@@ -63,6 +64,10 @@ func (a *UDPRouteAdapter) GetName() string {
 
 func (a *UDPRouteAdapter) GetNamespace() string {
 	return a.udpRoute.Namespace
+}
+
+func (a *UDPRouteAdapter) GetUID() types.UID {
+	return a.udpRoute.UID
 }
 
 // UDPRouteRuleAdapter adapts UDPRouteRule to the RouteRule interface

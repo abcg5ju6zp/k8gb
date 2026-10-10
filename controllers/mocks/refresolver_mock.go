@@ -32,6 +32,7 @@ import (
 
 	v1beta1io "github.com/k8gb-io/k8gb/api/v1beta1io"
 	utils "github.com/k8gb-io/k8gb/controllers/utils"
+	types "k8s.io/apimachinery/pkg/types"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -71,6 +72,20 @@ func (m *MockGslbReferenceResolver) GetGslbExposedIPs(gslbAnnotations map[string
 func (mr *MockGslbReferenceResolverMockRecorder) GetGslbExposedIPs(gslbAnnotations, parentZoneDNSServers any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetGslbExposedIPs", reflect.TypeOf((*MockGslbReferenceResolver)(nil).GetGslbExposedIPs), gslbAnnotations, parentZoneDNSServers)
+}
+
+// GetReferencedUID mocks base method.
+func (m *MockGslbReferenceResolver) GetReferencedUID() types.UID {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetReferencedUID")
+	ret0, _ := ret[0].(types.UID)
+	return ret0
+}
+
+// GetReferencedUID indicates an expected call of GetReferencedUID.
+func (mr *MockGslbReferenceResolverMockRecorder) GetReferencedUID() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReferencedUID", reflect.TypeOf((*MockGslbReferenceResolver)(nil).GetReferencedUID))
 }
 
 // GetServers mocks base method.

@@ -129,6 +129,42 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
+	// The generation captured after spec resolution is the fencing token for
+	// every DNSEndpoint and status write below. A slow reconciliation spanning
+	// a spec switch re-checks this generation before writing, so a late
+	// reconciliation can never overwrite the result of a newer generation.
+	startGeneration := gslb.Generation
+
+	// == ResourceRef ownership handoff ==========
+	// Detect switches between referenced resources (Ingress -> Gateway API
+	// route/Service and vice versa) and pin a per-hostname handoff generation.
+	// While a handoff is in progress the previous reference keeps publishing
+	// its last usable result until the new reference is fully resolved and
+	// validated. When no switch is observed, the original reconciliation path
+	// below runs unchanged.
+	handoff, err := r.initOrGetResourceRefHandoff(ctx, gslb)
+	if err != nil {
+		m.IncrementError(gslb)
+		return result.RequeueError(fmt.Errorf("initializing ResourceRef handoff (%s)", err))
+	}
+	if handoff != nil {
+		return r.reconcileResourceRefHandoff(ctx, gslb, handoff, result)
+	}
+
+	return r.reconcileActiveResourceRef(ctx, gslb, result, startGeneration)
+}
+
+// reconcileActiveResourceRef is the original reconciliation path used when no
+// ResourceRef handoff is in progress. The only additions over the historical
+// behavior are: a generation fence guarding the DNSEndpoint/status writes, and
+// recording the active referenced object identity which is the baseline for
+// future handoff detection.
+func (r *GslbReconciler) reconcileActiveResourceRef(
+	ctx context.Context,
+	gslb *k8gbv1beta1io.Gslb,
+	result *utils.ReconcileResultHandler,
+	startGeneration int64,
+) (ctrl.Result, error) {
 	// == Reference resolution ==
 	refResolver, err := refresolver.New(gslb, r.Client)
 	if err != nil {
@@ -208,6 +244,14 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 	s.End()
 
+	// fence: external target resolution can take long enough for a newer
+	// generation (including a ResourceRef switch) to overtake this cycle
+	if err := r.assertActiveGeneration(ctx, gslb, startGeneration); err != nil {
+		r.Logger.Info().Str("gslb", gslb.Name).Err(err).
+			Msg("Skipping DNSEndpoint write from a stale reconciliation")
+		return result.Requeue()
+	}
+
 	_, s = r.Tracer.Start(ctx, "SaveDNSEndpoint")
 	err = epProvider.SaveDNSEndpoint(dnsEndpoint)
 	if err != nil {
@@ -215,6 +259,20 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return result.RequeueError(err)
 	}
 	s.End()
+
+	// fence again before touching the status: a newer generation (including a
+	// ResourceRef switch) may have started while the DNSEndpoint write was in
+	// flight, in which case the newer reconciliation owns both DNS and status
+	if err := r.assertActiveGeneration(ctx, gslb, startGeneration); err != nil {
+		r.Logger.Info().Str("gslb", gslb.Name).Err(err).
+			Msg("Skipping status update from a stale reconciliation")
+		return result.Requeue()
+	}
+
+	// record the identity which actually published after the successful write
+	desired := desiredResourceRefIdentity(gslb)
+	desired.UID = refResolver.GetReferencedUID()
+	gslb.Status.ActiveResourceRef = &desired
 
 	// == Status =
 	err = r.updateGslbStatus(ctx, gslb, dnsEndpoint)
@@ -229,6 +287,28 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// TODO: potentially enhance with smarter reaction to external Event
 	m.IncrementReconciliation(gslb)
 	return result.Requeue()
+}
+
+// assertActiveGeneration fences writes of the non-handoff path: the observed
+// generation must still be the latest one and no handoff may have started.
+func (r *GslbReconciler) assertActiveGeneration(
+	ctx context.Context,
+	gslb *k8gbv1beta1io.Gslb,
+	startGeneration int64,
+) error {
+	fresh := &k8gbv1beta1io.Gslb{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(gslb), fresh); err != nil {
+		return err
+	}
+	if fresh.Generation != startGeneration {
+		return fmt.Errorf("%w: observed generation %d, latest generation %d",
+			errStaleHandoffGeneration, startGeneration, fresh.Generation)
+	}
+	if fresh.Status.ResourceRefHandoff != nil {
+		return fmt.Errorf("%w: handoff for generation %d started",
+			errStaleHandoffGeneration, fresh.Status.ResourceRefHandoff.Generation)
+	}
+	return nil
 }
 
 // splitIPsByVersion splits a list of IP addresses into IPv4 and IPv6 addresses

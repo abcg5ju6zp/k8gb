@@ -29,11 +29,20 @@ import (
 	"github.com/k8gb-io/k8gb/controllers/refresolver/queryopts"
 	"github.com/k8gb-io/k8gb/controllers/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayapiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gatewayapiv1alpha3 "sigs.k8s.io/gateway-api/apis/v1alpha3"
 )
+
+// GetReferencedUID returns the UID of the resolved TLSRoute resource
+func (rr *ReferenceResolver) GetReferencedUID() types.UID {
+	if rr.tlsRoute == nil {
+		return ""
+	}
+	return rr.tlsRoute.GetUID()
+}
 
 var log = logging.Logger()
 

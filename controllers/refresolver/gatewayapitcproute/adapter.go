@@ -23,6 +23,7 @@ import (
 
 	"github.com/k8gb-io/k8gb/controllers/refresolver/gatewayapi"
 	"github.com/k8gb-io/k8gb/controllers/utils"
+	"k8s.io/apimachinery/pkg/types"
 	gatewayapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayapiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 )
@@ -63,6 +64,10 @@ func (a *TCPRouteAdapter) GetName() string {
 
 func (a *TCPRouteAdapter) GetNamespace() string {
 	return a.tcpRoute.Namespace
+}
+
+func (a *TCPRouteAdapter) GetUID() types.UID {
+	return a.tcpRoute.UID
 }
 
 // TCPRouteRuleAdapter adapts TCPRouteRule to the RouteRule interface

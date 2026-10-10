@@ -32,6 +32,7 @@ import (
 	"github.com/k8gb-io/k8gb/controllers/refresolver/istiovirtualservice"
 	"github.com/k8gb-io/k8gb/controllers/refresolver/lbservice"
 	"github.com/k8gb-io/k8gb/controllers/utils"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -47,6 +48,11 @@ type GslbReferenceResolver interface {
 	GetServers() ([]*k8gbv1beta1io.Server, error)
 	// GetGslbExposedIPs retrieves the load balancer IP address of the GSLB
 	GetGslbExposedIPs(gslbAnnotations map[string]string, parentZoneDNSServers utils.DNSList) ([]string, error)
+	// GetReferencedUID returns the UID of the referenced resource (Ingress,
+	// Gateway API route, Service, ...). It is used to pin ResourceRef handoff
+	// generations so that a deleted, recreated or renamed referenced object
+	// can never be confused with the pinned owner.
+	GetReferencedUID() types.UID
 }
 
 // New creates a new GSLBReferenceResolver
