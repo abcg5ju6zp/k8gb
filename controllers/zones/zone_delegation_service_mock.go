@@ -36,10 +36,50 @@ import (
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// MockGenerationCoordinator is a mock of GenerationCoordinator interface.
+type MockGenerationCoordinator struct {
+	ctrl     *gomock.Controller
+	recorder *MockGenerationCoordinatorMockRecorder
+	isgomock struct{}
+}
+
+// MockGenerationCoordinatorMockRecorder is the mock recorder for MockGenerationCoordinator.
+type MockGenerationCoordinatorMockRecorder struct {
+	mock *MockGenerationCoordinator
+}
+
+// NewMockGenerationCoordinator creates a new mock instance.
+func NewMockGenerationCoordinator(ctrl *gomock.Controller) *MockGenerationCoordinator {
+	mock := &MockGenerationCoordinator{ctrl: ctrl}
+	mock.recorder = &MockGenerationCoordinatorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockGenerationCoordinator) EXPECT() *MockGenerationCoordinatorMockRecorder {
+	return m.recorder
+}
+
+// EnsureGeneration mocks base method.
+func (m *MockGenerationCoordinator) EnsureGeneration(ctx context.Context, zones *v1beta1io.ZoneDelegationList) (CoreDNSGenerationGate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "EnsureGeneration", ctx, zones)
+	ret0, _ := ret[0].(CoreDNSGenerationGate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// EnsureGeneration indicates an expected call of EnsureGeneration.
+func (mr *MockGenerationCoordinatorMockRecorder) EnsureGeneration(ctx, zones any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EnsureGeneration", reflect.TypeOf((*MockGenerationCoordinator)(nil).EnsureGeneration), ctx, zones)
+}
+
 // MockZoneDelegation is a mock of ZoneDelegation interface.
 type MockZoneDelegation struct {
 	ctrl     *gomock.Controller
 	recorder *MockZoneDelegationMockRecorder
+	isgomock struct{}
 }
 
 // MockZoneDelegationMockRecorder is the mock recorder for MockZoneDelegation.
@@ -193,11 +233,12 @@ func (mr *MockZoneDelegationMockRecorder) Save(ctx, z any) *gomock.Call {
 }
 
 // UpdateCoreDNSConfiguration mocks base method.
-func (m *MockZoneDelegation) UpdateCoreDNSConfiguration(ctx context.Context, zd *v1beta1io.ZoneDelegation) error {
+func (m *MockZoneDelegation) UpdateCoreDNSConfiguration(ctx context.Context, zd *v1beta1io.ZoneDelegation) (CoreDNSGenerationGate, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "UpdateCoreDNSConfiguration", ctx, zd)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(CoreDNSGenerationGate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // UpdateCoreDNSConfiguration indicates an expected call of UpdateCoreDNSConfiguration.

@@ -63,6 +63,24 @@ k8gb:
   zoneDelegationRecoverySeconds: 60
   # -- TTL of the NS and respective glue record used by external DNS
   nsRecordTTL: 30
+  # -- Safe generation-based rollout of the CoreDNS dynamic-zones ConfigMap.
+  # Zone changes are rendered into an immutable candidate ConfigMap, validated,
+  # rolled out to a canary Deployment/Service and probed via authoritative
+  # NS/A/AAAA queries before the active generation is switched and the
+  # external zone delegation is published.
+  coreDnsRollout:
+    # -- enables safe generation rollout; kill-switch that falls back to
+    # writing rendered zones directly into the k8gb-zone-delegation ConfigMap
+    enabled: true
+    # -- seconds to wait for the canary CoreDNS Deployment to become ready
+    # before the candidate generation is quarantined
+    canaryReadyTimeoutSeconds: 120
+    # -- seconds to wait for the production CoreDNS Deployment rollout to
+    # complete before rolling back the promotion patch
+    rolloutTimeoutSeconds: 120
+    # -- number of most recent quarantined generation ConfigMaps retained
+    # for diagnostics; older ones are garbage collected
+    quarantineGenerations: 3
 
   log:
     # -- log format (simple,json)

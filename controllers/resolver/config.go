@@ -48,6 +48,14 @@ type Config struct {
 
 	ZoneDelegationRecoverySeconds int `env:"ZONE_DELEGATION_RECOVERY_SECONDS" optional:""  default:"3600" validate:"min=0" help:"delay between individual reconciliations when ZoneDelegation fails. If set to 0, reconciliation is only triggered at startup or when the ZoneDelegation changes."`
 
+	CoreDNSRolloutEnabled bool `env:"COREDNS_ROLLOUT_ENABLED" optional:"" default:"true" help:"enables safe generation-based rollout of the CoreDNS dynamic-zones ConfigMap (immutable candidate ConfigMap, canary Deployment/Service, readiness and authoritative DNS probe before promotion). Kill-switch: when set to false, the controller falls back to the legacy behavior of writing the rendered zones directly into the k8gb-zone-delegation ConfigMap"`
+
+	CoreDNSCanaryReadyTimeoutSeconds int `env:"COREDNS_CANARY_READY_TIMEOUT_SECONDS" optional:"" default:"120" validate:"min=1" help:"seconds to wait for the canary CoreDNS Deployment to become ready before the candidate generation is quarantined"`
+
+	CoreDNSRolloutTimeoutSeconds int `env:"COREDNS_ROLLOUT_TIMEOUT_SECONDS" optional:"" default:"120" validate:"min=1" help:"seconds to wait for the production CoreDNS Deployment rollout to complete before rolling back the promotion patch"`
+
+	CoreDNSQuarantineGenerations int `env:"COREDNS_QUARANTINE_GENERATIONS" optional:"" default:"3" validate:"min=0" help:"number of most recent quarantined generation ConfigMaps to retain for diagnostics; older quarantined generations are garbage collected"`
+
 	NSRecordTTL int `env:"NS_RECORD_TTL" optional:"" default:"30" validate:"min=1" help:"TTL of the NS and respective glue record used by external DNS."`
 
 	K8gbNamespace string `env:"POD_NAMESPACE" optional:"" default:"k8gb" help:"namespace where k8gb pod is running"`

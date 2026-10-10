@@ -86,6 +86,16 @@ spec:
               value: {{ quote .Values.k8gb.zoneDelegationRecoverySeconds }}
             - name: NS_RECORD_TTL
               value: {{ quote .Values.k8gb.nsRecordTTL }}
+            {{- with .Values.k8gb.coreDnsRollout }}
+            - name: COREDNS_ROLLOUT_ENABLED
+              value: {{ quote .enabled }}
+            - name: COREDNS_CANARY_READY_TIMEOUT_SECONDS
+              value: {{ quote .canaryReadyTimeoutSeconds }}
+            - name: COREDNS_ROLLOUT_TIMEOUT_SECONDS
+              value: {{ quote .rolloutTimeoutSeconds }}
+            - name: COREDNS_QUARANTINE_GENERATIONS
+              value: {{ quote .quarantineGenerations }}
+            {{- end }}
             {{- if .Values.infoblox.enabled }}
             - name: INFOBLOX_GRID_HOST
               valueFrom:

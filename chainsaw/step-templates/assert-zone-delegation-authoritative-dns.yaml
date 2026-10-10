@@ -1,0 +1,45 @@
+---
+# Asserts authoritative DNS keeps answering through the generation switch:
+# - NS query for each delegated zone returns NOERROR and contains every
+#   expected glue NS name (entries use the form "zone:ns1,ns2,...")
+# - each local cluster glue NS name resolves to at least one IPv4 address
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: StepTemplate
+metadata:
+  name: assert-zone-delegation-authoritative-dns
+spec:
+  try:
+  - script:
+      env:
+        - name: DNS_PORT
+          value: ($generationDnsPort)
+        - name: NS_EXPECTATIONS
+          value: (join(' ', $generationNsExpectations))
+        - name: LOCAL_NS_NAMES
+          value: (join(' ', $generationLocalNsNames))
+      content: |
+        set -u
+        for expectation in $NS_EXPECTATIONS; do
+          zone=${expectation%%:*}
+          names=${expectation#*:}
+          ns_answer=$(dig @localhost -p "$DNS_PORT" "$zone" NS +short)
+          for ns in $(echo "$names" | tr ',' ' '); do
+            if ! echo "$ns_answer" | grep -Fxq "$ns."; then
+              echo "expected NS $ns. in authoritative answer for $zone, got:"
+              echo "$ns_answer"
+              exit 1
+            fi
+          done
+        done
+        for ns in $LOCAL_NS_NAMES; do
+          a_answer=$(dig @localhost -p "$DNS_PORT" "$ns" A +short)
+          if [ -z "$a_answer" ]; then
+            echo "glue NS $ns has no A records"
+            exit 1
+          fi
+          echo "$a_answer" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || {
+            echo "glue NS $ns returned a non-IPv4 answer:"
+            echo "$a_answer"
+            exit 1
+          }
+        done

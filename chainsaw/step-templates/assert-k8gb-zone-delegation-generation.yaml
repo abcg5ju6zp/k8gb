@@ -1,0 +1,78 @@
+---
+# Asserts the safe CoreDNS generation rollout steady state:
+# - anchor carries an active generation annotation and no in-flight candidate
+# - the immutable generation ConfigMap exists, matches the active fingerprint,
+#   carries controller labels and the expected zone files, and the anchor data
+#   mirrors it byte for byte
+# - the canary Deployment/Service have been removed after promotion
+# - exactly one generation ConfigMap remains (previous generations are
+#   released once nothing references them)
+# - the stable CoreDNS Service selects the active generation
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: StepTemplate
+metadata:
+  name: assert-k8gb-zone-delegation-generation
+spec:
+  try:
+  - script:
+      env:
+        - name: EXPECTED_HOSTS
+          value: (join(' ', $zoneDelegationHosts))
+      content: |
+        set -u
+        ANCHOR_JSON=$(kubectl get cm k8gb-zone-delegation -n k8gb -o json)
+        ACTIVE=$(echo "$ANCHOR_JSON" | jq -r '.metadata.annotations["k8gb.io/zd-active-generation"] // empty')
+        if [ -z "$ACTIVE" ]; then
+          echo "anchor k8gb-zone-delegation is missing the k8gb.io/zd-active-generation annotation"
+          exit 1
+        fi
+        echo "$ANCHOR_JSON" | jq -e '
+          ((.metadata.annotations["k8gb.io/zd-candidate-generation"] // "") | length == 0) and
+          ((.metadata.annotations["k8gb.io/zd-candidate-phase"] // "Active") == "Active")
+        ' >/dev/null || { echo "candidate generation is still in flight"; exit 1; }
+
+        GEN_NAME="k8gb-zone-delegation-$ACTIVE"
+        GEN_JSON=$(kubectl get cm "$GEN_NAME" -n k8gb -o json) || {
+          echo "active generation ConfigMap $GEN_NAME does not exist"
+          exit 1
+        }
+        printf '%s\n' "$ANCHOR_JSON" > /tmp/k8gb-zd-anchor.json
+        printf '%s\n' "$GEN_JSON" > /tmp/k8gb-zd-gen.json
+        jq -e -n \
+          --slurpfile anchor /tmp/k8gb-zd-anchor.json \
+          --slurpfile gen /tmp/k8gb-zd-gen.json \
+          --arg hosts "$EXPECTED_HOSTS" \
+          --arg fingerprint "$ACTIVE" '
+          ($hosts | split(" ")) as $expectedHosts |
+          ($gen[0].immutable == true) and
+          ($gen[0].metadata.annotations["k8gb.io/zd-fingerprint"] == $fingerprint) and
+          ($gen[0].metadata.labels["k8gb.io/zd-generation"] == $fingerprint) and
+          ($gen[0].metadata.labels["k8gb.io/zd-role"] == "zd-generation") and
+          ($anchor[0].data == $gen[0].data) and
+          ($gen[0].data | length == ($expectedHosts | length)) and
+          all($gen[0].data[]; . as $value |
+            any($expectedHosts[]; $value == (. + ":5353 {\n  import k8gbplugins\n}\n")))
+        ' >/dev/null || { echo "active generation ConfigMap content or metadata mismatch"; exit 1; }
+
+        if kubectl get deploy k8gb-coredns-zd-canary -n k8gb >/dev/null 2>&1; then
+          echo "canary Deployment still exists after promotion"
+          exit 1
+        fi
+        if kubectl get svc k8gb-coredns-zd-canary -n k8gb >/dev/null 2>&1; then
+          echo "canary Service still exists after promotion"
+          exit 1
+        fi
+
+        kubectl get cm -n k8gb \
+          -l k8gb.io/zd-managed-by=k8gb-coredns-rollout -o json | jq -e \
+          --arg genName "$GEN_NAME" '
+          [.items[] | select(.metadata.labels["k8gb.io/zd-role"] == "zd-generation")] as $generations |
+          ($generations | length == 1) and ($generations[0].metadata.name == $genName)
+        ' >/dev/null || { echo "unexpected generation ConfigMap set after reference release"; exit 1; }
+
+        kubectl get svc -n k8gb -l app.kubernetes.io/name=coredns -o json | jq -e \
+          --arg fingerprint "$ACTIVE" '
+          [.items[] | select(.metadata.labels["app.kubernetes.io/component"] != "metrics")] as $stable |
+          ($stable | length == 1) and
+          ($stable[0].spec.selector["k8gb.io/zd-generation"] == $fingerprint)
+        ' >/dev/null || { echo "stable CoreDNS Service does not select the active generation"; exit 1; }

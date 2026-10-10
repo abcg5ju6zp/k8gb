@@ -32,10 +32,12 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel/trace"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -49,7 +51,12 @@ type ZoneDelegationReconciler struct {
 	DNSProvider dns.Provider
 	ZoneService zones.ZoneDelegation
 	IPResolver  ipresolver.Resolver
-	Logger      *zerolog.Logger
+
+	// RolloutCache is the namespace-scoped informer cache used to watch
+	// rollout resources (anchor/generation ConfigMaps, CoreDNS Deployment,
+	// Service and canary Pods). When nil, only ZoneDelegation is watched.
+	RolloutCache cache.Cache
+	Logger       *zerolog.Logger
 }
 
 const zoneDelegationFinalizer = "k8gb.io/finalizer"
@@ -89,9 +96,25 @@ func (r *ZoneDelegationReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return result.RequeueError(err)
 	}
 
-	err = r.ZoneService.UpdateCoreDNSConfiguration(ctx, zone)
+	gate, err := r.ZoneService.UpdateCoreDNSConfiguration(ctx, zone)
 	if err != nil {
 		r.Logger.Err(err).Str("Name", req.Name).Msg("Error updating zone delegation")
+		return result.RequeueError(err)
+	}
+	if !gate.Active {
+		// External delegation must not be published before the new generation
+		// is active. A progressing candidate is polled at a short fixed
+		// interval; a failed candidate uses the recovery requeue semantics.
+		if gate.RequeueAfter > 0 {
+			r.Logger.Info().
+				Str("name", req.Name).
+				Str("reason", gate.Reason).
+				Msgf("CoreDNS generation not active yet; requeuing in %v", gate.RequeueAfter)
+			return ctrl.Result{RequeueAfter: gate.RequeueAfter}, nil
+		}
+		err := fmt.Errorf("CoreDNS generation is not active: %s", gate.Reason)
+		r.Logger.Err(err).Str("name", req.Name).Msg("CoreDNS candidate generation failed")
+		r.Recorder.Event(zone, corev1.EventTypeWarning, "CoreDNSGenerationFailed", gate.Reason)
 		return result.RequeueError(err)
 	}
 

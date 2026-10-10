@@ -899,3 +899,74 @@ func (s *SpyClient) Update(ctx context.Context, obj client.Object, opts ...clien
 	s.assertFunc(obj)
 	return s.Client.Update(ctx, obj, opts...)
 }
+
+func TestConfigCoreDNSRollout(t *testing.T) {
+	baseEnv := `CLUSTER_GEO_TAG=us;
+			 EDGE_DNS_SERVERS=local.test`
+	var tests = []struct {
+		name      string
+		envvars   string
+		assertErr assert.ErrorAssertionFunc
+		assertCfg func(t *testing.T, cfg *Config)
+	}{
+		{
+			name:      "rollout settings default when env vars are unset",
+			envvars:   baseEnv,
+			assertErr: assert.NoError,
+			assertCfg: func(t *testing.T, cfg *Config) {
+				assert.True(t, cfg.CoreDNSRolloutEnabled)
+				assert.Equal(t, 120, cfg.CoreDNSCanaryReadyTimeoutSeconds)
+				assert.Equal(t, 120, cfg.CoreDNSRolloutTimeoutSeconds)
+				assert.Equal(t, 3, cfg.CoreDNSQuarantineGenerations)
+			},
+		},
+		{
+			name: "rollout kill-switch is parsed as disabled",
+			envvars: baseEnv + `;
+			 COREDNS_ROLLOUT_ENABLED=false`,
+			assertErr: assert.NoError,
+			assertCfg: func(t *testing.T, cfg *Config) {
+				assert.False(t, cfg.CoreDNSRolloutEnabled)
+			},
+		},
+		{
+			name: "canary ready timeout of zero is rejected",
+			envvars: baseEnv + `;
+			 COREDNS_CANARY_READY_TIMEOUT_SECONDS=0`,
+			assertErr: assert.Error,
+			assertCfg: func(t *testing.T, cfg *Config) {
+				assert.Nil(t, cfg)
+			},
+		},
+		{
+			name: "negative rollout timeout is rejected",
+			envvars: baseEnv + `;
+			 COREDNS_ROLLOUT_TIMEOUT_SECONDS=-5`,
+			assertErr: assert.Error,
+			assertCfg: func(t *testing.T, cfg *Config) {
+				assert.Nil(t, cfg)
+			},
+		},
+		{
+			name: "zero quarantine generations is accepted",
+			envvars: baseEnv + `;
+			 COREDNS_QUARANTINE_GENERATIONS=0`,
+			assertErr: assert.NoError,
+			assertCfg: func(t *testing.T, cfg *Config) {
+				assert.Equal(t, 0, cfg.CoreDNSQuarantineGenerations)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cleanup := setEnvVarsFromString(test.envvars)
+			defer cleanup()
+			os.Args = []string{os.Args[0]}
+			cfg, err := NewResolver().ResolveOperatorConfig()
+			test.assertErr(t, err)
+			if test.assertCfg != nil {
+				test.assertCfg(t, cfg)
+			}
+		})
+	}
+}

@@ -8,21 +8,63 @@ metadata:
 {{ include "chart.labels" . | nindent 4 }}
 rules:
   # Mutating access is restricted to the k8gb namespace.
+  # Anchor ConfigMap (k8gb-zone-delegation) and immutable generation
+  # ConfigMaps with content-addressed names; resourceNames cannot be used
+  # because generation names are dynamic.
   - apiGroups:
       - ""
     resources:
       - configmaps
-    verbs:
-      - create
-  - apiGroups:
-      - ""
-    resources:
-      - configmaps
-    resourceNames:
-      - k8gb-zone-delegation
     verbs:
       - get
+      - list
+      - watch
+      - create
       - update
       - patch
       - delete
+  # Production CoreDNS Deployment promotion/rollback patches and canary
+  # Deployment lifecycle (create/update/scale/delete).
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # Stable CoreDNS Service selector switch and canary Service lifecycle.
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # Ready Pods are the RBAC-available projection of Service Endpoints for
+  # the serving-capacity (address family) checks during promotion.
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list
+      - watch
+  # Rollout progress/failure Events.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
 {{- end }}

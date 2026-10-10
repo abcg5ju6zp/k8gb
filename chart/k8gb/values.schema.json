@@ -459,6 +459,9 @@
                     "type": "integer",
                     "minimum": 0
                 },
+                "coreDnsRollout": {
+                    "$ref": "#/definitions/k8gbCoreDnsRollout"
+                },
                 "log": {
                     "$ref": "#/definitions/k8gbLog"
                 },
@@ -569,6 +572,34 @@
                 }
             },
             "title": "Log"
+        },
+        "k8gbCoreDnsRollout": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "canaryReadyTimeoutSeconds": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "rolloutTimeoutSeconds": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "quarantineGenerations": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            },
+            "required": [
+                "enabled",
+                "canaryReadyTimeoutSeconds",
+                "rolloutTimeoutSeconds",
+                "quarantineGenerations"
+            ],
+            "title": "CoreDnsRollout"
         },
         "k8gbSecurityContext": {
             "type": "object",

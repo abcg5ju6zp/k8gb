@@ -120,6 +120,56 @@ spec:
       use:
         template: ../../step-templates/assert-k8gb-zone-delegation-dnsendpoint.yaml
 
+    - name: (1/5) Verify CoreDNS generation rollout steady state on EU
+      description: gen-0 adoption - immutable generation ConfigMap, active anchor, no canary, stable Service selector
+      cluster: eu
+      bindings:
+        - name: zoneDelegationHosts
+          value:
+            - cloud.example.com
+      use:
+        template: ../../step-templates/assert-k8gb-zone-delegation-generation.yaml
+
+    - name: (1/5) Verify authoritative NS/A answers on EU
+      description: CoreDNS keeps answering NS and glue A through the active generation
+      cluster: eu
+      bindings:
+        - name: generationDnsPort
+          value: ($values.dns_port_eu)
+        - name: generationNsExpectations
+          value:
+            - cloud.example.com:gslb-ns-eu-cloud.example.com,gslb-ns-us-cloud.example.com
+        - name: generationLocalNsNames
+          value:
+            - gslb-ns-eu-cloud.example.com
+      use:
+        template: ../../step-templates/assert-zone-delegation-authoritative-dns.yaml
+
+    - name: (1/5) Verify CoreDNS generation rollout steady state on US
+      description: gen-0 adoption - immutable generation ConfigMap, active anchor, no canary, stable Service selector
+      cluster: us
+      bindings:
+        - name: zoneDelegationHosts
+          value:
+            - cloud.example.com
+      use:
+        template: ../../step-templates/assert-k8gb-zone-delegation-generation.yaml
+
+    - name: (1/5) Verify authoritative NS/A answers on US
+      description: CoreDNS keeps answering NS and glue A through the active generation
+      cluster: us
+      bindings:
+        - name: generationDnsPort
+          value: ($values.dns_port_us)
+        - name: generationNsExpectations
+          value:
+            - cloud.example.com:gslb-ns-eu-cloud.example.com,gslb-ns-us-cloud.example.com
+        - name: generationLocalNsNames
+          value:
+            - gslb-ns-us-cloud.example.com
+      use:
+        template: ../../step-templates/assert-zone-delegation-authoritative-dns.yaml
+
       # 2/5 apply new zone delegation (cloud2-example-com) on EU cluster
     - name: (2/5) Apply new zone delegation on EU cluster
       cluster: eu
@@ -193,6 +243,34 @@ spec:
       use:
         template: ../../step-templates/assert-k8gb-zone-delegation-dnsendpoint.yaml
 
+
+    - name: (2/5) Verify CoreDNS generation rollout steady state on EU
+      description: new immutable generation ConfigMap for both zones, canary removed, stable Service selects new generation
+      cluster: eu
+      bindings:
+        - name: zoneDelegationHosts
+          value:
+            - cloud.example.com
+            - cloud2.example.com
+      use:
+        template: ../../step-templates/assert-k8gb-zone-delegation-generation.yaml
+
+    - name: (2/5) Verify authoritative NS/A answers on EU
+      description: cloud keeps both glue NS, cloud2 is delegated to the EU glue only
+      cluster: eu
+      bindings:
+        - name: generationDnsPort
+          value: ($values.dns_port_eu)
+        - name: generationNsExpectations
+          value:
+            - cloud.example.com:gslb-ns-eu-cloud.example.com,gslb-ns-us-cloud.example.com
+            - cloud2.example.com:gslb-ns-eu-cloud2.example.com
+        - name: generationLocalNsNames
+          value:
+            - gslb-ns-eu-cloud.example.com
+            - gslb-ns-eu-cloud2.example.com
+      use:
+        template: ../../step-templates/assert-zone-delegation-authoritative-dns.yaml
 
     - name: (2/5) DNSEndpoint k8gb-ns-extdns-cloud2-example-com object doesn't exist on US
       description: Verify k8gb-ns-extdns-cloud2-example-com object doesn't exist on US
@@ -307,6 +385,34 @@ spec:
       use:
         template: ../../step-templates/assert-k8gb-zone-delegation-dnsendpoint.yaml
 
+    - name: (3/5) Verify CoreDNS generation rollout steady state on US
+      description: new immutable generation ConfigMap for both zones, canary removed, stable Service selects new generation
+      cluster: us
+      bindings:
+        - name: zoneDelegationHosts
+          value:
+            - cloud.example.com
+            - cloud2.example.com
+      use:
+        template: ../../step-templates/assert-k8gb-zone-delegation-generation.yaml
+
+    - name: (3/5) Verify authoritative NS/A answers on US
+      description: both zones answer with the EU and US glue NS and local glue A records
+      cluster: us
+      bindings:
+        - name: generationDnsPort
+          value: ($values.dns_port_us)
+        - name: generationNsExpectations
+          value:
+            - cloud.example.com:gslb-ns-eu-cloud.example.com,gslb-ns-us-cloud.example.com
+            - cloud2.example.com:gslb-ns-eu-cloud2.example.com,gslb-ns-us-cloud2.example.com
+        - name: generationLocalNsNames
+          value:
+            - gslb-ns-us-cloud.example.com
+            - gslb-ns-us-cloud2.example.com
+      use:
+        template: ../../step-templates/assert-zone-delegation-authoritative-dns.yaml
+
     - name: (4/5) Delete zone delegation on US cluster
       cluster: us
       try:
@@ -373,6 +479,31 @@ spec:
       use:
         template: ../../step-templates/assert-k8gb-zone-delegation-cm.yaml
 
+    - name: (4/5) Verify CoreDNS generation rollout steady state on US
+      description: shrink rolled back to a single-zone active generation and the previous generation was released
+      cluster: us
+      bindings:
+        - name: zoneDelegationHosts
+          value:
+            - cloud.example.com
+      use:
+        template: ../../step-templates/assert-k8gb-zone-delegation-generation.yaml
+
+    - name: (4/5) Verify authoritative NS/A answers on US
+      description: cloud keeps answering with both glue NS and the local glue A record
+      cluster: us
+      bindings:
+        - name: generationDnsPort
+          value: ($values.dns_port_us)
+        - name: generationNsExpectations
+          value:
+            - cloud.example.com:gslb-ns-eu-cloud.example.com,gslb-ns-us-cloud.example.com
+        - name: generationLocalNsNames
+          value:
+            - gslb-ns-us-cloud.example.com
+      use:
+        template: ../../step-templates/assert-zone-delegation-authoritative-dns.yaml
+
     - name: (4/5) Verify k8gb-zone-delegation ConfigMap on EU
       description: Verify k8gb-zone-delegation ConfigMap contaions only one record *.example.com:5353 on US
       cluster: eu
@@ -438,6 +569,31 @@ spec:
             - cloud.example.com
       use:
         template: ../../step-templates/assert-k8gb-zone-delegation-cm.yaml
+
+    - name: (5/5) Verify CoreDNS generation rollout steady state on EU
+      description: shrink rolled back to a single-zone active generation and the previous generation was released
+      cluster: eu
+      bindings:
+        - name: zoneDelegationHosts
+          value:
+            - cloud.example.com
+      use:
+        template: ../../step-templates/assert-k8gb-zone-delegation-generation.yaml
+
+    - name: (5/5) Verify authoritative NS/A answers on EU
+      description: cloud keeps answering with both glue NS and the local glue A record
+      cluster: eu
+      bindings:
+        - name: generationDnsPort
+          value: ($values.dns_port_eu)
+        - name: generationNsExpectations
+          value:
+            - cloud.example.com:gslb-ns-eu-cloud.example.com,gslb-ns-us-cloud.example.com
+        - name: generationLocalNsNames
+          value:
+            - gslb-ns-eu-cloud.example.com
+      use:
+        template: ../../step-templates/assert-zone-delegation-authoritative-dns.yaml
 
     - name: (5/5) DNSEndpoint object doesn't exist on EU
       description: on EU DNSEndpoint not exists

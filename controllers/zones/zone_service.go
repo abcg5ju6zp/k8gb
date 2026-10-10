@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/k8gb-io/k8gb/controllers/geotags"
 
@@ -39,6 +40,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
+// CoreDNSGenerationGate is the reconciler-facing result of converging the
+// CoreDNS dynamic-zones configuration. Active=false means external zone
+// delegation publication must be skipped; RequeueAfter carries the polling
+// interval while a candidate advances (zero for a terminal failure).
+type CoreDNSGenerationGate struct {
+	Active       bool
+	RequeueAfter time.Duration
+	Reason       string
+}
+
+// GenerationCoordinator is the narrow safe-rollout boundary satisfied by
+// corednsrollout.Coordinator. Keeping the interface here lets the zones
+// package render desired content and delegate its safe publication without
+// importing the rollout state machine.
+type GenerationCoordinator interface {
+	EnsureGeneration(ctx context.Context, zones *v1beta1io.ZoneDelegationList) (CoreDNSGenerationGate, error)
+}
+
 type ZoneDelegation interface {
 	List(ctx context.Context) (*v1beta1io.ZoneDelegationList, error)
 	Get(ctx context.Context, objKey client.ObjectKey) (*v1beta1io.ZoneDelegation, error)
@@ -50,7 +69,7 @@ type ZoneDelegation interface {
 	UpdateStatus(ctx context.Context, zd *v1beta1io.ZoneDelegation) (*v1beta1io.ZoneDelegation, error)
 	ExtendedZoneDelegation(ctx context.Context, zd *v1beta1io.ZoneDelegation) (*ExtendedZoneDelegation, error)
 	ResolveAuthoritativeServersFromZoneDelegations(ctx context.Context, host string) (AuthoritativeServers, error)
-	UpdateCoreDNSConfiguration(ctx context.Context, zd *v1beta1io.ZoneDelegation) error
+	UpdateCoreDNSConfiguration(ctx context.Context, zd *v1beta1io.ZoneDelegation) (CoreDNSGenerationGate, error)
 }
 
 type ZoneDelegationImpl struct {
@@ -58,6 +77,16 @@ type ZoneDelegationImpl struct {
 	config     *resolver.Config
 	ipresolver ipresolver.Resolver
 	apiReader  client.Reader
+	rollout    GenerationCoordinator
+}
+
+// WithGenerationCoordinator wires the safe generation rollout coordinator.
+// Without it (or when the feature kill-switch is off) the service keeps the
+// legacy behavior of writing rendered zones directly into the anchor
+// ConfigMap.
+func (z *ZoneDelegationImpl) WithGenerationCoordinator(coordinator GenerationCoordinator) *ZoneDelegationImpl {
+	z.rollout = coordinator
+	return z
 }
 
 func NewZoneDelegationImpl(
@@ -270,16 +299,51 @@ func (z *ZoneDelegationImpl) ExtendedZoneDelegation(ctx context.Context, zd *v1b
 	return NewZoneDelegationWrapper(zd, z.config, z.ipresolver).GetDetail(ctx)
 }
 
-// UpdateCoreDNSConfiguration creates or updates the k8gb-zone-delegation ConfigMap.
-// It also removes the zone entry when the ZoneDelegation is being deleted.
-func (z *ZoneDelegationImpl) UpdateCoreDNSConfiguration(ctx context.Context, zd *v1beta1io.ZoneDelegation) error {
-	const zoneCM = "k8gb-zone-delegation"
+// UpdateCoreDNSConfiguration converges the k8gb-zone-delegation configuration
+// to the rendered desired set. With a rollout coordinator wired it delegates
+// to the safe generation state machine and returns its gate (the caller must
+// not publish external delegations until Active); without one it writes the
+// rendered zones directly to the anchor ConfigMap (legacy behavior). The
+// zone entry is removed when the ZoneDelegation is being deleted.
+func (z *ZoneDelegationImpl) UpdateCoreDNSConfiguration(ctx context.Context, zd *v1beta1io.ZoneDelegation) (CoreDNSGenerationGate, error) {
+	list, err := z.desiredZoneDelegations(ctx, zd)
+	if err != nil {
+		return CoreDNSGenerationGate{}, err
+	}
+	if z.rollout != nil {
+		return z.rollout.EnsureGeneration(ctx, list)
+	}
+	if err := z.writeCoreDNSConfigurationLegacy(ctx, list); err != nil {
+		return CoreDNSGenerationGate{}, err
+	}
+	return CoreDNSGenerationGate{Active: true}, nil
+}
 
+// desiredZoneDelegations renders the effective set: every persisted
+// non-deleting ZoneDelegation, plus the currently reconciled one (it may not
+// be visible in the cache yet), excluding it while it is being deleted.
+func (z *ZoneDelegationImpl) desiredZoneDelegations(ctx context.Context, zd *v1beta1io.ZoneDelegation) (*v1beta1io.ZoneDelegationList, error) {
 	list, err := z.List(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to list ZoneDelegations: %w", err)
+		return nil, fmt.Errorf("failed to list ZoneDelegations: %w", err)
 	}
+	if zd == nil || zd.IsInDeletion() {
+		return list, nil
+	}
+	for i := range list.Items {
+		if list.Items[i].Name == zd.Name {
+			list.Items[i] = *zd
+			return list, nil
+		}
+	}
+	list.Items = append(list.Items, *zd)
+	return list, nil
+}
 
+// writeCoreDNSConfigurationLegacy writes the rendered zones directly into the
+// anchor ConfigMap, reproducing the pre-rollout behavior.
+func (z *ZoneDelegationImpl) writeCoreDNSConfigurationLegacy(ctx context.Context, list *v1beta1io.ZoneDelegationList) error {
+	const zoneCM = "k8gb-zone-delegation"
 	coreDNSZones := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      zoneCM,
@@ -290,28 +354,20 @@ func (z *ZoneDelegationImpl) UpdateCoreDNSConfiguration(ctx context.Context, zd 
 	// The controller-runtime client uses a cache for ConfigMap objects.
 	// For the cache to work, the controller needs list/watch permissions for ConfigMaps
 	// across all namespaces, even if it only updates a single ConfigMap.
-	_, err = controllerutil.CreateOrUpdate(ctx, z.client, coreDNSZones, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, z.client, coreDNSZones, func() error {
 		newData := make(map[string]string)
-
 		for _, zone := range list.Items {
 			if zone.IsInDeletion() {
 				continue
 			}
-
 			newData[configName(zone)] = getCoreDNSData(zone.Spec.LoadBalancedZone)
 		}
-
-		if !zd.IsInDeletion() {
-			newData[configName(*zd)] = getCoreDNSData(zd.Spec.LoadBalancedZone)
-		}
-
 		coreDNSZones.Data = newData
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("cannot interact with %s: %w", zoneCM, err)
 	}
-
 	return nil
 }
 
