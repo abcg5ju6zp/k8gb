@@ -407,6 +407,42 @@ spec:
             status:
               description: GslbStatus defines the observed state of Gslb
               properties:
+                conditions:
+                  description: Conditions report per-Gslb hostname ownership state
+                  items:
+                    description: Condition contains details for one aspect of the current state of this API Resource.
+                    properties:
+                      lastTransitionTime:
+                        description: LastTransitionTime is the last time the condition transitioned from one status to another.
+                        format: date-time
+                        type: string
+                      message:
+                        description: Human readable message indicating details about last transition.
+                        type: string
+                      observedGeneration:
+                        description: ObservedGeneration represents the .metadata.generation that the condition was set based upon.
+                        format: int64
+                        type: integer
+                      reason:
+                        description: Reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        type: string
+                      status:
+                        description: Status of the condition, one of True, False, Unknown.
+                        type: string
+                      type:
+                        description: Type of condition.
+                        type: string
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    type: object
+                  type: array
+                  x-kubernetes-list-map-keys:
+                    - type
+                  x-kubernetes-list-type: map
                 geoTag:
                   description: Cluster Geo Tag
                   type: string

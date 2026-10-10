@@ -35,6 +35,19 @@ rules:
     - update
 
 - apiGroups:
+    - k8gb.io
+  resources:
+    - hostnameownerships
+  verbs:
+    - get
+    - list
+    - watch
+    - create
+    - update
+    - patch
+    - delete
+
+- apiGroups:
   - ""
   resources:
   - events

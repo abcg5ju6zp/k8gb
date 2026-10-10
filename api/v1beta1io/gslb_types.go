@@ -104,6 +104,10 @@ type GslbStatus struct {
 	LoadBalancer LoadBalancer `json:"loadBalancer,omitempty"`
 	// Servers configuration
 	Servers []*Server `json:"servers,omitempty"`
+	// Conditions report per-Gslb hostname ownership state, for example when
+	// the Gslb computes records for a hostname owned by another Gslb and the
+	// records are therefore withheld from external DNS.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

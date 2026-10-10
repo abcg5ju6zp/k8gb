@@ -25,6 +25,7 @@ import (
 	"github.com/go-logr/logr"
 
 	"github.com/k8gb-io/k8gb/controllers/ipresolver"
+	"github.com/k8gb-io/k8gb/controllers/ownership"
 	"github.com/k8gb-io/k8gb/controllers/utils"
 	"github.com/k8gb-io/k8gb/controllers/zones"
 
@@ -156,6 +157,12 @@ func run() error {
 		ZoneService:        zoneDelegationService,
 		Logger:             log,
 	}
+	gslbReconciler.Ownership = ownership.NewManager(
+		mgr.GetClient(),
+		log,
+		controllers.NewGslbClaimValidator(mgr.GetClient(), r),
+		ownership.NewDNSVerifier(utils.NewDNSQueryService(), config.ParentZoneDNSServers),
+	)
 	legacyReconciler := &controllers.LegacyGslbReconciler{
 		Config:      config,
 		Client:      mgr.GetClient(),

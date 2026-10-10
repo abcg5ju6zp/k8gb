@@ -25,6 +25,7 @@ import (
 	"net"
 	"reflect"
 
+	"github.com/k8gb-io/k8gb/controllers/ownership"
 	"github.com/k8gb-io/k8gb/controllers/providers/dns"
 	"github.com/k8gb-io/k8gb/controllers/providers/k8gbendpoint"
 	"github.com/k8gb-io/k8gb/controllers/providers/metrics"
@@ -43,6 +44,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	externaldnsApi "sigs.k8s.io/external-dns/apis/v1alpha1"
 )
 
 // GslbReconciler reconciles a Gslb object
@@ -56,7 +58,11 @@ type GslbReconciler struct {
 	Tracer             trace.Tracer
 	ZoneService        zones.ZoneDelegation
 	GslbIngressHandler Handler
-	Logger             *zerolog.Logger
+	// Ownership arbitrates per-hostname ownership so only the single recorded
+	// owner Gslb publishes DNS results. When nil, legacy single-writer behavior
+	// is preserved.
+	Ownership *ownership.Manager
+	Logger    *zerolog.Logger
 }
 
 const (
@@ -71,6 +77,8 @@ var m = metrics.Metrics()
 
 // +kubebuilder:rbac:groups=k8gb.io,resources=gslbs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=k8gb.io,resources=gslbs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=k8gb.io,resources=gslbs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=k8gb.io,resources=hostnameownerships,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile runs main reconciliation loop
@@ -100,6 +108,13 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 		m.IncrementError(gslb)
 		return result.RequeueError(fmt.Errorf("error reading the object (%s)", err))
+	}
+
+	// Deleting Gslbs only run hostname ownership handoff; their computed
+	// DNSEndpoint must keep serving until the successor publication is
+	// confirmed, so the finalizer blocks garbage collection until then.
+	if gslb.DeletionTimestamp != nil {
+		return r.reconcileGslbDeletion(ctx, gslb, result)
 	}
 
 	err = r.Resolver.ResolveGslbSpec(ctx, gslb, r.Client)
@@ -201,23 +216,88 @@ func (r *GslbReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		m.IncrementError(gslb)
 		return result.RequeueError(err)
 	}
-	err = controllerutil.SetControllerReference(gslb, dnsEndpoint, r.Scheme)
-	if err != nil {
+	s.End()
+
+	// Keep the Gslb alive while hostname ownership may need to be handed over
+	// on deletion.
+	if err = r.ensureHostnameFinalizer(ctx, gslb); err != nil {
 		m.IncrementError(gslb)
 		return result.RequeueError(err)
 	}
+
+	// == per-hostname ownership arbitration ==
+	// Every declared hostname participates, even when its computed record set
+	// is currently empty.
+	digests := ownership.HostDigests(dnsEndpoint.Spec.Endpoints)
+	claimedHosts := ownership.ClaimedHosts(gslb)
+	for host := range claimedHosts {
+		if _, exists := digests[host]; !exists {
+			digests[host] = ""
+		}
+	}
+	var decision *ownership.Decision
+	if r.Ownership != nil {
+		decision, err = r.Ownership.ReconcileHosts(ctx, gslb, digests)
+		if err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(fmt.Errorf("arbitrating hostname ownership: %w", err))
+		}
+	} else {
+		decision = ownership.AllowAllDecision(claimedHosts)
+	}
+	applyOwnershipConditions(gslb, decision)
+
+	// The intended records reflect the full computation and feed status and
+	// metrics regardless of what is actually published.
+	intendedEndpoint := dnsEndpoint.DeepCopy()
+	publishedRecords, withheldRecords := ownership.PartitionEndpoints(dnsEndpoint.Spec.Endpoints, decision.Owners)
+
+	// Only the recorded owner may publish; a Gslb owning none of its hostnames
+	// drops its public DNSEndpoint so it cannot overwrite external records.
+	_, s = r.Tracer.Start(ctx, "SaveDNSEndpoint")
+	var publishedEndpoint *externaldnsApi.DNSEndpoint
+	if len(publishedRecords) > 0 {
+		dnsEndpoint.Spec.Endpoints = publishedRecords
+		if err = controllerutil.SetControllerReference(gslb, dnsEndpoint, r.Scheme); err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(err)
+		}
+		if err = epProvider.SaveDNSEndpoint(dnsEndpoint); err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(err)
+		}
+		publishedEndpoint = dnsEndpoint
+	} else {
+		if err = epProvider.RemoveEndpoint(); err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(err)
+		}
+	}
 	s.End()
 
-	_, s = r.Tracer.Start(ctx, "SaveDNSEndpoint")
-	err = epProvider.SaveDNSEndpoint(dnsEndpoint)
-	if err != nil {
-		m.IncrementError(gslb)
-		return result.RequeueError(err)
+	// Conflicting hostnames keep their computed records in a secondary,
+	// non-selected DNSEndpoint instead of rewriting external records.
+	_, s = r.Tracer.Start(ctx, "SaveWithheldDNSEndpoint")
+	if len(withheldRecords) > 0 {
+		withheldEndpoint := epProvider.NewWithheldEndpoint(withheldRecords, conflictOwnerRefs(decision))
+		if err = controllerutil.SetControllerReference(gslb, withheldEndpoint, r.Scheme); err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(err)
+		}
+		if err = epProvider.SaveEndpoint(withheldEndpoint); err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(err)
+		}
+	} else {
+		if err = epProvider.RemoveEndpointByName(epProvider.WithheldEndpointName()); err != nil {
+			m.IncrementError(gslb)
+			return result.RequeueError(err)
+		}
 	}
 	s.End()
 
 	// == Status =
-	err = r.updateGslbStatus(ctx, gslb, dnsEndpoint)
+	err = r.updateGslbStatus(ctx, gslb, intendedEndpoint, publishedEndpoint)
 	if err != nil {
 		m.IncrementError(gslb)
 		return result.RequeueError(err)

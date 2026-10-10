@@ -1,0 +1,172 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: hostnameownerships.k8gb.io
+spec:
+  group: k8gb.io
+  names:
+    kind: HostnameOwnership
+    listKind: HostnameOwnershipList
+    plural: hostnameownerships
+    shortNames:
+      - ho
+    singular: hostnameownership
+  scope: Cluster
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - jsonPath: .spec.hostname
+          name: Hostname
+          type: string
+        - jsonPath: .spec.phase
+          name: Phase
+          type: string
+        - jsonPath: .spec.epoch
+          name: Epoch
+          type: integer
+        - jsonPath: .spec.owner.namespace
+          name: Owner
+          type: string
+        - jsonPath: .spec.owner.name
+          name: OwnerName
+          type: string
+      schema:
+        openAPIV3Schema:
+          description: HostnameOwnership binds a normalized hostname to the single Gslb allowed to publish it.
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: HostnameOwnershipSpec is the persistent, arbitrated ownership state of one normalized hostname.
+              properties:
+                hostname:
+                  description: Hostname is the normalized DNS name this record governs.
+                  type: string
+                phase:
+                  description: Phase is the current ownership phase.
+                  enum:
+                    - Active
+                    - Releasing
+                  type: string
+                epoch:
+                  description: |-
+                    Epoch is the ownership version. It is bumped every time ownership or the phase
+                    transitions and fences stale arbitration results.
+                  type: integer
+                  format: int64
+                owner:
+                  description: Owner is the unique Gslb allowed to publish the hostname.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    uid:
+                      type: string
+                    generation:
+                      type: integer
+                      format: int64
+                    strategy:
+                      type: string
+                    primaryGeoTag:
+                      type: string
+                    targetsDigest:
+                      type: string
+                  required:
+                    - name
+                    - namespace
+                    - uid
+                    - generation
+                    - strategy
+                  type: object
+                successor:
+                  description: Successor is the designated next owner while Phase is Releasing.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    uid:
+                      type: string
+                    generation:
+                      type: integer
+                      format: int64
+                    strategy:
+                      type: string
+                    primaryGeoTag:
+                      type: string
+                    targetsDigest:
+                      type: string
+                  required:
+                    - name
+                    - namespace
+                    - uid
+                    - generation
+                    - strategy
+                  type: object
+                previousOwner:
+                  description: PreviousOwner is the outgoing owner, cleared after successor publication is confirmed.
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                    uid:
+                      type: string
+                    generation:
+                      type: integer
+                      format: int64
+                    strategy:
+                      type: string
+                    primaryGeoTag:
+                      type: string
+                    targetsDigest:
+                      type: string
+                  required:
+                    - name
+                    - namespace
+                    - uid
+                    - generation
+                    - strategy
+                  type: object
+                candidates:
+                  description: Candidates are the claimants observed during the latest arbitration.
+                  items:
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      uid:
+                        type: string
+                      generation:
+                        type: integer
+                        format: int64
+                      strategy:
+                        type: string
+                      primaryGeoTag:
+                        type: string
+                      targetsDigest:
+                        type: string
+                    required:
+                      - name
+                      - namespace
+                      - uid
+                      - generation
+                      - strategy
+                    type: object
+                  type: array
+              required:
+                - hostname
+                - phase
+                - epoch
+              type: object
+          type: object

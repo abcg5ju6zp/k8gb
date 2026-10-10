@@ -22,19 +22,22 @@ import (
 	"context"
 
 	k8gbv1beta1io "github.com/k8gb-io/k8gb/api/v1beta1io"
-	"k8s.io/apimachinery/pkg/types"
 	externaldnsApi "sigs.k8s.io/external-dns/apis/v1alpha1"
 )
 
-func (r *GslbReconciler) updateGslbStatus(ctx context.Context, gslb *k8gbv1beta1io.Gslb, ep *externaldnsApi.DNSEndpoint) error {
-
+// updateGslbStatus persists the Gslb status. intendedEndpoint carries the full
+// computed record set (including hostnames the Gslb must withhold), while
+// publishedEndpoint is the subset actually written to external DNS and may be
+// nil when the Gslb publishes none of its hostnames.
+func (r *GslbReconciler) updateGslbStatus(
+	ctx context.Context,
+	gslb *k8gbv1beta1io.Gslb,
+	intendedEndpoint *externaldnsApi.DNSEndpoint,
+	publishedEndpoint *externaldnsApi.DNSEndpoint,
+) error {
 	m.UpdateIngressHostsPerStatusMetric(gslb, gslb.Status.ServiceHealth)
 
-	var err error
-	gslb.Status.HealthyRecords, err = r.getHealthyRecords(ctx, gslb)
-	if err != nil {
-		return err
-	}
+	gslb.Status.HealthyRecords = collectHealthyRecordsFromDNSEndpoint(intendedEndpoint)
 
 	gslb.Status.GeoTag = r.Config.ClusterGeoTag
 	gslb.Status.Hosts = r.hostsToCSV(gslb)
@@ -42,30 +45,15 @@ func (r *GslbReconciler) updateGslbStatus(ctx context.Context, gslb *k8gbv1beta1
 	m.UpdateHealthyRecordsMetric(gslb, gslb.Status.HealthyRecords)
 	m.UpdateHealthyLocalRecordsMetric(gslb, gslb.Status.HealthyRecords, gslb.Status.LoadBalancer.ExposedIPs)
 
-	m.UpdateEndpointStatus(ep)
+	if publishedEndpoint != nil {
+		m.UpdateEndpointStatus(publishedEndpoint)
+	}
 
-	err = r.Status().Update(ctx, gslb)
-	return err
+	return r.Status().Update(ctx, gslb)
 }
 
 func (r *GslbReconciler) getServiceHealthStatus(ctx context.Context, gslb *k8gbv1beta1io.Gslb) (map[string]k8gbv1beta1io.HealthStatus, error) {
 	return calculateServiceHealth(ctx, r.Client, gslb)
-}
-
-func (r *GslbReconciler) getHealthyRecords(ctx context.Context, gslb *k8gbv1beta1io.Gslb) (map[string][]string, error) {
-
-	dnsEndpoint := &externaldnsApi.DNSEndpoint{}
-
-	nn := types.NamespacedName{
-		Name:      gslb.Name,
-		Namespace: gslb.Namespace,
-	}
-
-	err := r.Get(ctx, nn, dnsEndpoint)
-	if err != nil {
-		return nil, err
-	}
-	return collectHealthyRecordsFromDNSEndpoint(dnsEndpoint), nil
 }
 
 func (r *GslbReconciler) hostsToCSV(gslb *k8gbv1beta1io.Gslb) string {

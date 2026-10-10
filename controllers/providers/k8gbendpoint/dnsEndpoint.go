@@ -38,9 +38,11 @@ const (
 )
 
 const (
-	dnsTypeAnnotation       = "k8gb.io/dnstype"
-	legacyDNSTypeAnnotation = "k8gb.absa.oss/dnstype"
-	externalDNSTypeCommon   = "extdns"
-	localDNSType            = "local"
-	strategyLabel           = "strategy"
+	dnsTypeAnnotation        = "k8gb.io/dnstype"
+	legacyDNSTypeAnnotation  = "k8gb.absa.oss/dnstype"
+	externalDNSTypeCommon    = "extdns"
+	localDNSType             = "local"
+	withheldDNSType          = "withheld"
+	withheldOwnersAnnotation = "k8gb.io/hostname-owners"
+	strategyLabel            = "strategy"
 )

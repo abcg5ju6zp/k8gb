@@ -43,4 +43,6 @@ func init() {
 	SchemeBuilder.Register(&ZoneDelegation{}, &ZoneDelegationList{})
 
 	SchemeBuilder.Register(&Gslb{}, &GslbList{})
+
+	SchemeBuilder.Register(&HostnameOwnership{}, &HostnameOwnershipList{})
 }
